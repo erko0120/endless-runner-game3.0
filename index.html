@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Endless Runner 3D - Complete Build</title>
+<style>
+  body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+  #ui, #customization, #pauseMenu {
+    position: absolute; color: white; font-size: 16px;
+    background: rgba(0,0,0,0.6); padding: 10px; border-radius: 8px;
+  }
+  #ui { top: 10px; left: 10px; }
+  #customization { top: 10px; right: 10px; width: 220px; }
+  #pauseMenu {
+    top: 50%; left: 50%; transform: translate(-50%, -50%);
+    display: none; text-align: center;
+  }
+  input, select, button { width: 100%; margin-top: 8px; padding: 6px; font-size: 14px; }
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap');
+  #speedometer { font-family: 'Orbitron', sans-serif; font-size: 22px; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <div id="speedometer">Speed: <span id="speed">0</span> km/h</div>
+  <div>Distance: <span id="distance">0</span> m</div>
+  <button id="pauseBtn">Pause</button>
+</div>
+<div id="customization">
+  <h3>Car Customization</h3>
+  <label>Car Model:</label>
+  <select id="carModel">
+    <option value="vw">VW ID Buzz</option>
+    <option value="tesla">Tesla</option>
+    <option value="slowroads">Slowroads Style</option>
+  </select>
+  <label>Color:</label>
+  <select id="carColor">
+    <option value="black">Black</option>
+    <option value="gray">Gray</option>
+  </select>
+  <label>Size:</label>
+  <input type="range" id="carSize" min="0.5" max="2" step="0.1" value="1" />
+  <label>Graphics:</label>
+  <select id="graphics">
+    <option value="low">Low</option>
+    <option value="medium">Medium</option>
+    <option value="high">High</option>
+  </select>
+</div>
+<div id="pauseMenu">
+  <h1>Paused</h1>
+  <button id="resumeBtn">Resume</button>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.min.js"></script>
+<script>
+// === SCENE SETUP ===
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0xa0a0a0, 50, 500);
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 5000);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+// SKYBOX
+const loader = new THREE.CubeTextureLoader();
+const skyTexture = loader.load([
+  'https://threejs.org/examples/textures/cube/skybox/px.jpg',
+  'https://threejs.org/examples/textures/cube/skybox/nx.jpg',
+  'https://threejs.org/examples/textures/cube/skybox/py.jpg',
+  'https://threejs.org/examples/textures/cube/skybox/ny.jpg',
+  'https://threejs.org/examples/textures/cube/skybox/pz.jpg',
+  'https://threejs.org/examples/textures/cube/skybox/nz.jpg'
+]);
+scene.background = skyTexture;
+
+// LIGHTS
+const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1);
+scene.add(hemiLight);
+const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+dirLight.position.set(50, 100, 50);
+dirLight.castShadow = true;
+scene.add(dirLight);
+
+// ROAD
+const roadWidth = 10;
+const roadSegments = [];
+const segmentLength = 50;
+for (let i = 0; i < 25; i++) addRoadSegment(i * segmentLength);
+function addRoadSegment(zPos) {
+  const geo = new THREE.PlaneGeometry(roadWidth, segmentLength);
+  const mat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+  const seg = new THREE.Mesh(geo, mat);
+  seg.rotation.x = -Math.PI / 2;
+  seg.position.z = zPos;
+  seg.receiveShadow = true;
+  scene.add(seg);
+  roadSegments.push(seg);
+}
+
+// TERRAIN
+const terrainGeo = new THREE.PlaneGeometry(2000, 4000, 64, 64);
+const terrainMat = new THREE.MeshStandardMaterial({ color: 0x228B22 });
+const terrain = new THREE.Mesh(terrainGeo, terrainMat);
+terrain.rotation.x = -Math.PI / 2;
+terrain.position.y = -2;
+scene.add(terrain);
+
+// Add procedural bumps for mountains
+for (let i = 0; i < terrainGeo.attributes.position.count; i++) {
+  let y = terrainGeo.attributes.position.getY(i);
+  let x = terrainGeo.attributes.position.getX(i);
+  let z = terrainGeo.attributes.position.getZ(i);
+  y += Math.random() * 20 * Math.sin(i);
+  terrainGeo.attributes.position.setY(i, y);
+}
+terrainGeo.computeVertexNormals();
+
+// TREES
+function addTree(x, z) {
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 2), new THREE.MeshStandardMaterial({ color: 0x8b4513 }));
+  const leaves = new THREE.Mesh(new THREE.SphereGeometry(1.5, 8, 8), new THREE.MeshStandardMaterial({ color: 0x228b22 }));
+  trunk.position.set(x, 1, z);
+  leaves.position.set(x, 3, z);
+  scene.add(trunk);
+  scene.add(leaves);
+}
+for (let i = 0; i < 150; i++) addTree((Math.random() * 1000) - 500, (Math.random() * 3000));
+
+// LAKES
+function addLake(x, z) {
+  const lakeGeo = new THREE.CircleGeometry(30, 32);
+  const lakeMat = new THREE.MeshStandardMaterial({ color: 0x1e90ff, transparent: true, opacity: 0.7 });
+  const lake = new THREE.Mesh(lakeGeo, lakeMat);
+  lake.rotation.x = -Math.PI / 2;
+  lake.position.set(x, -1.9, z);
+  scene.add(lake);
+}
+for (let i = 0; i < 5; i++) addLake((Math.random() * 1500) - 750, (Math.random() * 2500));
+
+// ANIMATED GRASS (particles)
+const grassGeo = new THREE.BufferGeometry();
+const grassCount = 2000;
+const positions = [];
+for (let i = 0; i < grassCount; i++) {
+  positions.push((Math.random() * 2000) - 1000);
+  positions.push(-1.5);
+  positions.push((Math.random() * 3000));
+}
+grassGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+const grassMat = new THREE.PointsMaterial({ color: 0x00ff00, size: 0.5 });
+const grass = new THREE.Points(grassGeo, grassMat);
+scene.add(grass);
+
+// PLAYER CAR
+let car;
+function createCar(model, color) {
+  if (car) scene.remove(car);
+  let geo;
+  if (model === 'vw') geo = new THREE.BoxGeometry(2.2, 1.2, 4.5);
+  else if (model === 'tesla') geo = new THREE.BoxGeometry(2, 1, 4);
+  else geo = new THREE.BoxGeometry(2, 0.8, 3.8);
+  const mat = new THREE.MeshStandardMaterial({ color: color === 'black' ? 0x111111 : 0x777777 });
+  car = new THREE.Mesh(geo, mat);
+  car.position.set(0, 1, 0);
+  car.castShadow = true;
+  scene.add(car);
+}
+createCar('vw', 'black');
+
+// CAMERA
+camera.position.set(0, 4, -8);
+
+// AUDIO
+const listener = new THREE.AudioListener();
+camera.add(listener);
+const sound = new THREE.Audio(listener);
+const audioLoader = new THREE.AudioLoader();
+audioLoader.load('https://cdn.pixabay.com/download/audio/2022/03/15/audio_9a4d064b4d.mp3?filename=driving-loop-10463.mp3', buffer => {
+  sound.setBuffer(buffer);
+  sound.setLoop(true);
+  sound.setVolume(0.3);
+  sound.play();
+});
+
+// STATE
+let speed = 80;
+let distance = 0;
+let isPaused = false;
+
+// UI
+const speedEl = document.getElementById('speed');
+const distanceEl = document.getElementById('distance');
+const pauseBtn = document.getElementById('pauseBtn');
+const resumeBtn = document.getElementById('resumeBtn');
+const pauseMenu = document.getElementById('pauseMenu');
+const carModelSel = document.getElementById('carModel');
+const carColorSel = document.getElementById('carColor');
+const carSizeSlider = document.getElementById('carSize');
+const graphicsSel = document.getElementById('graphics');
+
+pauseBtn.onclick = () => { isPaused = true; pauseMenu.style.display = 'block'; sound.pause(); };
+resumeBtn.onclick = () => { isPaused = false; pauseMenu.style.display = 'none'; sound.play(); };
+carModelSel.onchange = () => createCar(carModelSel.value, carColorSel.value);
+carColorSel.onchange = () => createCar(carModelSel.value, carColorSel.value);
+carSizeSlider.oninput = () => { if (car) car.scale.set(carSizeSlider.value, carSizeSlider.value, carSizeSlider.value); };
+graphicsSel.onchange = () => adjustGraphics(graphicsSel.value);
+
+function adjustGraphics(level) {
+  if (level === 'low') {
+    renderer.shadowMap.enabled = false;
+    grassMat.size = 0.2;
+    dirLight.intensity = 0.5;
+  }
+  if (level === 'medium') {
+    renderer.shadowMap.enabled = true;
+    grassMat.size = 0.4;
+    dirLight.intensity = 0.8;
+  }
+  if (level === 'high') {
+    renderer.shadowMap.enabled = true;
+    grassMat.size = 0.6;
+    dirLight.intensity = 1.2;
+  }
+}
+
+// INPUT
+const keys = {};
+window.addEventListener('keydown', e => keys[e.code] = true);
+window.addEventListener('keyup', e => keys[e.code] = false);
+
+// ANIMATE
+function animate() {
+  requestAnimationFrame(animate);
+  if (!isPaused) {
+    const speedMS = speed / 3.6;
+    distance += speedMS * 0.016;
+
+    if (keys['ArrowLeft'] || keys['KeyA']) car.position.x -= 0.1;
+    if (keys['ArrowRight'] || keys['KeyD']) car.position.x += 0.1;
+
+    roadSegments.forEach(seg => {
+      seg.position.z -= speedMS * 0.016;
+      if (seg.position.z < -segmentLength) seg.position.z += segmentLength * roadSegments.length;
+    });
+
+    speedEl.textContent = Math.round(speed);
+    distanceEl.textContent = Math.round(distance);
+
+    camera.position.x = car.position.x;
+    camera.position.z = car.position.z - 8;
+    camera.position.y = car.position.y + 4;
+    camera.lookAt(car.position);
+
+    // animate grass wave
+    const positions = grass.geometry.attributes.position.array;
+    for (let i = 0; i < positions.length; i += 3) {
+      positions[i + 1] = -1.5 + Math.sin(Date.now() * 0.002 + positions[i]) * 0.2;
+    }
+    grass.geometry.attributes.position.needsUpdate = true;
+  }
+  renderer.render(scene, camera);
+}
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
